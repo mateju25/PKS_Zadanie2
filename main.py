@@ -115,9 +115,8 @@ def send_message_data(client, message, size_fragments, frag_num, frags_to_send: 
             crc = zlib.crc32(temp)
             if random.random() < 0.3:
                 crc = crc - 1
-            # time.sleep(0.01)
-
             client.socket.sendto(create_data_packet(i, crc, temp), client.dest_adrr_port)
+            time.sleep(0.001)
 
         if everything_good[0]:
             t2.join()
@@ -177,6 +176,9 @@ def main_client(client):
             if keep_alive:
                 keep_alive = False
                 t1.join()
+            os.system('cls')
+            header()
+            server_header(client.dest_adrr_port[1])
             main_server(client)
             return
 
@@ -226,12 +228,26 @@ def main_client(client):
 
 # region Server
 
-def server_menu():
+def server_menu(server):
     print()
     print("****************************************************")
     print("*Moznosti:   c - zmenit rolu   e - ukoncit         *")
+    print("*            p - pokracovat                        *")
     print("****************************************************")
-    return input("Vyber: \n")
+    my_choice = input("Vyber: \n")
+    while True:
+        if my_choice == "p":
+            return 0
+        elif my_choice == "c":
+            os.system('cls')
+            header()
+            client_header(server.dest_adrr_port)
+            main_client(server)
+            return 1
+        elif my_choice == "e":
+            print("Uzavieram spojenie.")
+            server.socket.close()
+            return 1
 
 
 def start_server(port):
@@ -252,25 +268,8 @@ def start_server(port):
         print("----------------------------------------------------")
         print()
 
-        t1 = threading.Thread(target=main_server, args=[server], daemon=True)
-        t1.start()
-        while True:
-            choice_S = server_menu()
-            if choice_S == 'c':
-                try:
-                    t1.join(1)
-                except RuntimeError:
-                    pass
-                main_client(server)
-
-            elif choice_S == 'e':
-                server.socket.close()
-                try:
-                    t1.join(1)
-                except RuntimeError:
-                    pass
-                return
-
+        main_server(server)
+        return
     except socket.timeout:
         print("Uzavieram spojenie.")
         server.socket.close()
@@ -320,7 +319,11 @@ def main_server(server):
     server.socket.settimeout(60)
     try:
         while True:
+            if server_menu(server):
+                return
+
             data, addr = server.socket.recvfrom(1500)
+
             packet_type, num_of_packets, file_name = decode_informative_packet(data)
             if packet_type == 1:
                 print("Spojenie ostava - prišiel keep alive.")
@@ -328,6 +331,9 @@ def main_server(server):
 
             elif packet_type == 2 or packet_type == 3:
                 listen_to_data(server, packet_type, num_of_packets, file_name)
+
+                if server_menu(server):
+                    return
 
     except socket.timeout:
         print("Uzavieram spojenie.")
@@ -337,13 +343,29 @@ def main_server(server):
 
 # endregion
 
-def menu():
+def header():
     print()
     print("*****************************************************************************")
     print("                              UDP komunikátor                                ")
     print("                           Autor: Matej Delinčák                             ")
     print("*****************************************************************************")
     print()
+
+
+def server_header(port):
+    print("Počúvam na porte ", port)
+    print("----------------------------------------------------")
+    print()
+
+
+def client_header(addr_port):
+    print(f"IP adresa servera {addr_port[0]} a počúva na porte {addr_port[1]}")
+    print("----------------------------------------------------")
+    print()
+
+
+def menu():
+    header()
     choice = input("Odosielatel - o, Prijimatel - p: ")
     if choice == 'o':
         start_client(input("IP adresa serveru: "), input("Port serveru: "))
