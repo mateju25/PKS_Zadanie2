@@ -11,6 +11,7 @@ class Participant:
     socket = None
     dest_adrr_port = None
 
+
 # region Protokol
 
 
@@ -20,12 +21,13 @@ def create_informative_packet(packet_type, packets=0, name_of_file=''.encode()):
     if name_of_file == '':
         return struct.pack("B", packet_type) + packets.to_bytes(3, byteorder='big')
     else:
-        return struct.pack("B", packet_type) + packets.to_bytes(3, byteorder='big') + struct.pack(f"{len(name_of_file)}s",
-                                                                                                  name_of_file)
+        return struct.pack("B", packet_type) + packets.to_bytes(3, byteorder='big') + struct.pack(
+            f"{len(name_of_file)}s", name_of_file)
 
 
 def create_data_packet(packet_number, crc, data):
-    return packet_number.to_bytes(3, byteorder='big') + crc.to_bytes(4, byteorder='big') + struct.pack(f"{len(data)}s", data)
+    return packet_number.to_bytes(3, byteorder='big') + crc.to_bytes(4, byteorder='big') + struct.pack(f"{len(data)}s",
+                                                                                                       data)
 
 
 def decode_informative_packet(data):
@@ -108,7 +110,7 @@ def send_message_data(client, message, size_fragments, frag_num, frags_to_send: 
             if i == frag_num:
                 temp = message[(i - 1) * size_fragments:]
             else:
-                temp = message[(i-1)*size_fragments:i * size_fragments]
+                temp = message[(i - 1) * size_fragments:i * size_fragments]
 
             crc = zlib.crc32(temp)
             if random.random() < 0.3:
@@ -141,17 +143,6 @@ def listen_to_wrong_data(client, everything_good, frags_to_send: [], sent_frags:
             return
 
 
-def is_someone_there(client):
-    client.socket.sendto(create_informative_packet(1), client.dest_adrr_port)
-    try:
-        client.socket.settimeout(10)
-        data, addr = client.socket.recvfrom(1500)
-    except (ConnectionResetError, socket.timeout):
-        print("Server nepočúva.")
-        return 1
-    return 0
-
-
 def start_client(address, port):
     client = Participant()
     client.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -173,10 +164,8 @@ def main_client(client):
     global keep_alive
     t1 = None
     while True:
-        choice = client_menu()
-        if choice == 'k':
-            if is_someone_there(client):
-                continue
+        my_choice = client_menu()
+        if my_choice == 'k':
             keep_alive = not keep_alive
             if keep_alive:
                 t1 = threading.Thread(target=start_keep_alive, args=(client.socket, client.dest_adrr_port))
@@ -184,31 +173,22 @@ def main_client(client):
             else:
                 t1.join()
 
-        elif choice == 'c':
+        elif my_choice == 'c':
             if keep_alive:
                 keep_alive = False
                 t1.join()
-
-            if is_someone_there(client):
-                continue
-
-            client.socket.sendto(create_informative_packet(7), client.dest_adrr_port)
-
             main_server(client)
             return
 
-        elif choice == 's' or choice == 'f':
+        elif my_choice == 's' or my_choice == 'f':
             refresh = False
             if keep_alive:
                 refresh = True
                 keep_alive = False
                 t1.join()
 
-            if is_someone_there(client):
-                continue
-
             file = ''
-            if choice == 'f':
+            if my_choice == 'f':
                 file = input("Zadaj cestu: ")
                 with open(file, "rb") as f:
                     message = f.read()
@@ -226,7 +206,7 @@ def main_client(client):
             else:
                 frag_num = int(len(message) / size_fragments) + 1
 
-            if choice == 'f':
+            if my_choice == 'f':
                 client.socket.sendto(create_informative_packet(3, frag_num, file.encode()), client.dest_adrr_port)
             else:
                 client.socket.sendto(create_informative_packet(2, frag_num), client.dest_adrr_port)
@@ -238,7 +218,7 @@ def main_client(client):
                 keep_alive = True
                 t1 = threading.Thread(target=start_keep_alive, args=(client.socket, client.dest_adrr_port))
                 t1.start()
-        elif choice == 'e':
+        elif my_choice == 'e':
             return
 
 
@@ -246,7 +226,12 @@ def main_client(client):
 
 # region Server
 
-close_server = False
+def server_menu():
+    print()
+    print("****************************************************")
+    print("*Moznosti:   c - zmenit rolu   e - ukoncit         *")
+    print("****************************************************")
+    return input("Vyber: \n")
 
 
 def start_server(port):
@@ -266,7 +251,26 @@ def start_server(port):
         server.socket.sendto(create_informative_packet(0), server.dest_adrr_port)
         print("----------------------------------------------------")
         print()
-        main_server(server)
+
+        t1 = threading.Thread(target=main_server, args=[server], daemon=True)
+        t1.start()
+        while True:
+            choice_S = server_menu()
+            if choice_S == 'c':
+                try:
+                    t1.join(1)
+                except RuntimeError:
+                    pass
+                main_client(server)
+
+            elif choice_S == 'e':
+                server.socket.close()
+                try:
+                    t1.join(1)
+                except RuntimeError:
+                    pass
+                return
+
     except socket.timeout:
         print("Uzavieram spojenie.")
         server.socket.close()
@@ -324,30 +328,30 @@ def main_server(server):
 
             elif packet_type == 2 or packet_type == 3:
                 listen_to_data(server, packet_type, num_of_packets, file_name)
-            elif packet_type == 7:
-                break
 
     except socket.timeout:
         print("Uzavieram spojenie.")
         server.socket.close()
         return
 
-    main_client(server)
 
 # endregion
 
+def menu():
+    print()
+    print("*****************************************************************************")
+    print("                              UDP komunikátor                                ")
+    print("                           Autor: Matej Delinčák                             ")
+    print("*****************************************************************************")
+    print()
+    choice = input("Odosielatel - o, Prijimatel - p: ")
+    if choice == 'o':
+        start_client(input("IP adresa serveru: "), input("Port serveru: "))
+        # start_client("localhost", "5000")
+        # start_client("192.168.2.152", "5000")
+    elif choice == 'p':
+        # start_server(5000)
+        start_server(input("Port serveru: "))
 
-print()
-print("*****************************************************************************")
-print("                              UDP komunikátor                                ")
-print("                           Autor: Matej Delinčák                             ")
-print("*****************************************************************************")
-print()
-choice = input("Odosielatel - o, Prijimatel - p: ")
-if choice == 'o':
-    start_client(input("IP adresa serveru: "), input("Port serveru: "))
-    #start_client("localhost", "5000")
-    # start_client("192.168.2.152", "5000")
-elif choice == 'p':
-    #start_server(5000)
-    start_server(input("Port serveru: "))
+
+menu()
