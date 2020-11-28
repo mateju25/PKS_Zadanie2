@@ -290,8 +290,8 @@ def main_client(client):
                 client.my_socket.sendto(create_informative_packet(2, frag_num), client.dest_adrr_port)
 
             # posli data
-            frags_to_send = []
-            send_data(client, message, choice, size_fragments, frag_num, frags_to_send)
+            print("Bude poslaných ", frag_num, "paketov.")
+            send_data(client, message, choice, size_fragments, frag_num)
 
             # zapni keep alive ak bol predtym zapnuty
             if refresh:
@@ -378,6 +378,8 @@ def listen_to_data(server, packet_type, num_of_packets, file_name):
     print("Pakety: ", end='')
     packets = {}
 
+    good = 0
+    bad = 0
     # pocuvaj kym nemas vsetky pakety
     while len(packets) < num_of_packets:
         data, addr = server.my_socket.recvfrom(1500)
@@ -389,20 +391,27 @@ def listen_to_data(server, packet_type, num_of_packets, file_name):
             print(", ", end="")
             packets[pos] = received_data
             server.my_socket.sendto(create_informative_packet(4, pos), server.dest_adrr_port)
+            good += 1
         # zle crc
         else:
             print("X, ", end="")
             server.my_socket.sendto(create_informative_packet(5, pos), server.dest_adrr_port)
+            bad += 1
 
+    # posli ukoncovaci paket a prijmi odpoved
+    server.my_socket.sendto(create_informative_packet(6), server.dest_adrr_port)
+    data, addr = server.my_socket.recvfrom(1500)
+
+    print("\nPrišlo: ", good+bad, "paketov a z toho bolo", bad, "zlých.")
     print()
     # uloz data do suboru
     if packet_type == 3:
-        print("Uložený na ", os.path.abspath(file_name.decode()))
+        print("Uložený na ", os.path.abspath(file_name))
         packets = [x[1] for x in sorted(packets.items())]
         data = packets[0]
         for i in range(1, len(packets)):
             data = data + packets[i]
-        with open(file_name.decode(), "wb") as f:
+        with open(file_name, "wb") as f:
             f.write(data)
     # vypis spravu do konzoly
     else:
@@ -411,14 +420,13 @@ def listen_to_data(server, packet_type, num_of_packets, file_name):
             print(packets[i].decode("utf-8"), end='')
         print()
     print()
-    # posli ukoncovaci paket a prijmi odpoved
-    server.my_socket.sendto(create_informative_packet(6), server.dest_adrr_port)
-    data, addr = server.my_socket.recvfrom(1500)
+
 
 
 # hlavny cyklus serveru
 def main_server(server):
     server.my_socket.settimeout(60)
+    choice = input("Zadaj kam chceš ukladať súbory( '.' aktuálny adresár): ")
     try:
         if server_menu(server):
             return
@@ -434,6 +442,11 @@ def main_server(server):
             elif packet_type == 2 or packet_type == 3:
                 # prisiel pociatocny paket pre poslanie dat
                 server.my_socket.sendto(create_informative_packet(1), server.dest_adrr_port)
+                if packet_type == 3:
+                    if choice == '.':
+                        file_name = file_name.decode()
+                    else:
+                        file_name = os.path.join(choice, file_name.decode())
                 listen_to_data(server, packet_type, num_of_packets, file_name)
 
                 if server_menu(server):
