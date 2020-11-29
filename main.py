@@ -416,8 +416,10 @@ def listen_to_data(server, packet_type, num_of_packets, file_name):
     # vypis spravu do konzoly
     else:
         print("Prijatá správa: ", end="")
+        end = "".encode()
         for i in sorted(packets.keys()):
-            print(packets[i].decode("utf-8"), end='')
+            end += packets[i]
+        print(end.decode())
         print()
     print()
 
@@ -504,6 +506,8 @@ def menu():
     elif choice == 'p':
         # start_server(5000)
         start_server(input("Port serveru: "))
+
+# endregion
 
 
 menu()
