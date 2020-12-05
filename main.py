@@ -82,12 +82,13 @@ def start_keep_alive(dest_socket, addr_port):
 
         # cakaj sekundu na odpoved od servera
         try:
-            dest_socket.settimeout(1)
+            dest_socket.settimeout(2)
             data, addr = dest_socket.recvfrom(1500)
         except (ConnectionResetError, socket.timeout):
             if not keep_alive:
                 return
             print("Neprisiel ACK keep alive.")
+            keep_alive = False
             return
 
         # dekoduj ak prisiel paket
@@ -95,8 +96,8 @@ def start_keep_alive(dest_socket, addr_port):
 
         # ak prisiel iny typ paket, tak ukonci
         if packet_type != 1:
-            print("Neprisiel ACK keep alive.")
-            dest_socket.close()
+            print("Neprisiel spravny ACK keep alive.")
+            keep_alive = False
             return
 
         # ostava spojenie
@@ -114,50 +115,50 @@ def start_keep_alive(dest_socket, addr_port):
 
 # vypis hlavicku pre klienta a vrat vyber
 def client_menu():
+    global keep_alive
     print()
     print("****************************************************")
-    print("*Moznosti:   s - sprava        f - subor           *")
-    print("*            k - keep alive    c - zmenit rolu     *")
+    print("*Moznosti:   s - sprava           f - subor        *")
+    if keep_alive:
+        print("*            k - keep alive OFF   c - zmenit rolu  *")
+    else:
+        print("*            k - keep alive ON    c - zmenit rolu  *")
     print("*            e - ukoncit                           *")
     print("****************************************************")
     return input("Vyber: \n")
 
 
 # posli data serveru metodou SELECTIVE ARQ
-def send_data(client, data, num_of_wrong, size_of_fragment, num_of_frags):
-    # vytvor zasobnik s poradim paketov
-    frags_to_send = []
-    for i in range(num_of_frags, 0, -1):
-        frags_to_send.append(i)
-
+def send_data(client, data, frags_to_send, wrong, size_of_fragment):
     # vsetko prislo spravne?
     everything_good = [False]
     # uspesne odoslane pakety
     sent_frags = []
-
+    stack = [x for x in frags_to_send]
     # vytvor thread na pocuvanie odpovedi od serveru
     t2 = threading.Thread(target=listen_to_wrong_data,
-                          args=(client, everything_good, frags_to_send, sent_frags), daemon=True)
+                          args=(client, everything_good, stack, sent_frags), daemon=True)
     t2.start()
 
-    already = 0
     while True:
-        while len(frags_to_send) > 0:
+        while len(stack) > 0:
             # vyber prvy paket
-            i = frags_to_send.pop()
+            i = stack.pop()
             # vyber ktory fragment poslat
-            if i == num_of_frags:
-                temp = data[(i - 1) * size_of_fragment:]
-            else:
+            try:
                 temp = data[(i - 1) * size_of_fragment:i * size_of_fragment]
+            except IndexError:
+                temp = data[(i - 1) * size_of_fragment:]
 
             # vytvor crc
             crc = zlib.crc32(temp)
             # pridaj zle crc
-            if already < num_of_wrong:
+            if i in wrong:
                 crc = int(crc / 2)
-                already += 1
+                wrong.remove(i)
+
             # posli fragment
+            #time.sleep(0.00001)
             client.my_socket.sendto(create_data_packet(i, crc, temp), client.dest_adrr_port)
 
         time.sleep(0.5)
@@ -167,14 +168,15 @@ def send_data(client, data, num_of_wrong, size_of_fragment, num_of_frags):
             print("Všetko odoslané.")
             break
         else:
-            if len(sent_frags) != num_of_frags:
-                for x in range(1, num_of_frags + 1):
-                    if (x not in sent_frags) and (x not in frags_to_send):
-                        frags_to_send.append(x)
+            if len(sent_frags) != len(frags_to_send):
+                for x in frags_to_send:
+                    if x not in sent_frags:
+                        stack.append(x)
 
 
 # pocuvaj odpovede od serveru
 def listen_to_wrong_data(client, everything_good, frags_to_send, sent_frags):
+    client.my_socket.settimeout(20)
     while True:
         data, addr = client.my_socket.recvfrom(1500)
         packet_type, num_of_packets, file_name = decode_informative_packet(data)
@@ -237,7 +239,7 @@ def main_client(client):
                 t1.join()
             os.system('cls')
             header()
-            server_header(client.dest_adrr_port[1])
+            server_header(client.my_socket.getsockname()[1])
             main_server(client)
             return
 
@@ -245,7 +247,7 @@ def main_client(client):
         elif my_choice == 's' or my_choice == 'f':
             client.my_socket.sendto(create_informative_packet(1), client.dest_adrr_port)
             try:
-                client.my_socket.settimeout(10)
+                client.my_socket.settimeout(2)
                 data, addr = client.my_socket.recvfrom(1500)
             except (ConnectionResetError, socket.timeout):
                 print("Server nepocuva.")
@@ -262,6 +264,9 @@ def main_client(client):
             file = ''
             if my_choice == 'f':
                 file = input("Zadaj cestu: ")
+                while os.path.exists(file) is False:
+                    print("Súbor neexistuje")
+                    file = input("Zadaj cestu: ")
                 with open(file, "rb") as f:
                     message = f.read()
                 print("Posielam súbor z ", os.path.abspath(file))
@@ -274,14 +279,27 @@ def main_client(client):
                 print("Zlý vstup.")
                 size_fragments = int(input("Zadaj velkosť fragmetov (1-1465): "))
 
-            # pocet zlych paketov
-            choice = int(input("Zadaj počet chybných paketov: "))
-
             # vyrataj pocet fragmentov
             if len(message) % size_fragments == 0:
                 frag_num = int(len(message) / size_fragments)
             else:
                 frag_num = int(len(message) / size_fragments) + 1
+
+            # pocet zlych paketov
+            choice = int(input(f"Zadaj počet chybných paketov(0-{frag_num}): "))
+            while choice < 0 or choice > frag_num:
+                print("Zlý vstup.")
+                choice = int(input(f"Zadaj počet chybných paketov(0-{frag_num}): "))
+
+            # vytvor zasobnik na posielanie paketov
+            frags_to_send = []
+            for i in range(frag_num, 0, -1):
+                frags_to_send.append(i)
+
+            # vyvot pole zlych paketov
+            wrong = frags_to_send[frag_num - 1:frag_num - 1 - choice:-1]
+            # for i in range(0, choice):
+            #     wrong.append(frags_to_send[frag_num-i-1])
 
             # posli inicializacny paket
             if my_choice == 'f':
@@ -291,7 +309,8 @@ def main_client(client):
 
             # posli data
             print("Bude poslaných ", frag_num, "paketov.")
-            send_data(client, message, choice, size_fragments, frag_num)
+
+            send_data(client, message, frags_to_send, wrong, size_fragments)
 
             # zapni keep alive ak bol predtym zapnuty
             if refresh:
@@ -305,12 +324,14 @@ def main_client(client):
             if keep_alive:
                 keep_alive = False
                 t1.join()
+            client.my_socket.close()
             return
 
 
 # endregion
 
 # region Server
+
 
 # vypis hlavicku pre server
 def server_menu(server):
@@ -319,8 +340,8 @@ def server_menu(server):
     print("*Moznosti:   c - zmenit rolu   e - ukoncit         *")
     print("*            p - pokracovat                        *")
     print("****************************************************")
-    my_choice = input("Vyber: \n")
     while True:
+        my_choice = input("Vyber: \n")
         # moznost pre pokracovanie
         if my_choice == "p":
             return 0
@@ -385,16 +406,15 @@ def listen_to_data(server, packet_type, num_of_packets, file_name):
         data, addr = server.my_socket.recvfrom(1500)
         pos, crc, received_data = decode_data_packet(data)
         crc_now = zlib.crc32(received_data)
-        print(f"{pos}", end="")
         # dobre crc
         if crc == crc_now:
-            print(", ", end="")
+            print(f"{pos}, ", end="")
             packets[pos] = received_data
             server.my_socket.sendto(create_informative_packet(4, pos), server.dest_adrr_port)
             good += 1
         # zle crc
         else:
-            print("X, ", end="")
+            print(f"{pos}X, ", end="")
             server.my_socket.sendto(create_informative_packet(5, pos), server.dest_adrr_port)
             bad += 1
 
@@ -402,7 +422,8 @@ def listen_to_data(server, packet_type, num_of_packets, file_name):
     server.my_socket.sendto(create_informative_packet(6), server.dest_adrr_port)
     data, addr = server.my_socket.recvfrom(1500)
 
-    print("\nPrišlo: ", good+bad, "paketov a z toho bolo", bad, "zlých.")
+    print("\nVeľkosť fragmetov: ", len(packets[1]), "Počet fragentov: ", good,
+          "\nCelkovo prišlo: ", good + bad, "paketov a z toho bolo", bad, "zlých.")
     print()
     # uloz data do suboru
     if packet_type == 3:
@@ -424,7 +445,6 @@ def listen_to_data(server, packet_type, num_of_packets, file_name):
     print()
 
 
-
 # hlavny cyklus serveru
 def main_server(server):
     server.my_socket.settimeout(60)
@@ -438,7 +458,7 @@ def main_server(server):
             packet_type, num_of_packets, file_name = decode_informative_packet(data)
             if packet_type == 1:
                 # prisiel keep alive
-                print("Spojenie ostava - prišiel keep alive.")
+                print("Prišiel keep alive.")
                 server.my_socket.sendto(create_informative_packet(1), server.dest_adrr_port)
 
             elif packet_type == 2 or packet_type == 3:
@@ -457,8 +477,9 @@ def main_server(server):
             elif packet_type == 7:
                 # prislo oznamenie, ze klient skoncil
                 print("Klient už skončil.")
-                if server_menu(server):
-                    return
+                passx = input("Stlac cokolvek pre ukoncenie: ")
+                server.my_socket.close()
+                return
 
     except socket.timeout:
         print("Uzavieram spojenie.")
@@ -507,7 +528,12 @@ def menu():
         # start_server(5000)
         start_server(input("Port serveru: "))
 
+
 # endregion
 
 
-menu()
+while True:
+    menu()
+    choice = input("Znova pustit program? a/n")
+    if choice != 'a':
+        break
