@@ -133,11 +133,10 @@ def send_data(client, data, frags_to_send, wrong, size_of_fragment):
     # vsetko prislo spravne?
     everything_good = [False]
     # uspesne odoslane pakety
-    sent_frags = []
     stack = [x for x in frags_to_send]
     # vytvor thread na pocuvanie odpovedi od serveru
     t2 = threading.Thread(target=listen_to_wrong_data,
-                          args=(client, everything_good, stack, sent_frags), daemon=True)
+                          args=(client, everything_good, stack, frags_to_send), daemon=True)
     t2.start()
 
     while True:
@@ -158,24 +157,29 @@ def send_data(client, data, frags_to_send, wrong, size_of_fragment):
                 wrong.remove(i)
 
             # posli fragment
-            #time.sleep(0.00001)
+
             client.my_socket.sendto(create_data_packet(i, crc, temp), client.dest_adrr_port)
+            #time.sleep(0.0001)
 
         time.sleep(0.5)
+        if len(stack) > 0:
+            continue
         # skontroluj ci je vsetko v poriadku, a ak nie, tak dopln zasobnik o pakety, ktore neboli potvrdene ako prijate
         if everything_good[0]:
             t2.join()
             print("Všetko odoslané.")
             break
         else:
-            if len(sent_frags) != len(frags_to_send):
-                for x in frags_to_send:
-                    if x not in sent_frags:
-                        stack.append(x)
+            for x in frags_to_send:
+                stack.append(x)
+            # if len(sent_frags) != len(frags_to_send):
+            #     for x in frags_to_send:
+            #         if x not in sent_frags:
+            #             stack.append(x)
 
 
 # pocuvaj odpovede od serveru
-def listen_to_wrong_data(client, everything_good, frags_to_send, sent_frags):
+def listen_to_wrong_data(client, everything_good, stack, frags_to_send: []):
     client.my_socket.settimeout(20)
     while True:
         data, addr = client.my_socket.recvfrom(1500)
@@ -183,10 +187,12 @@ def listen_to_wrong_data(client, everything_good, frags_to_send, sent_frags):
         # rozhodni o aku odpoved ide
         # paket je v poriadku
         if packet_type == 4:
-            sent_frags.append(num_of_packets)
+            if num_of_packets in frags_to_send:
+                frags_to_send.remove(num_of_packets)
+            #sent_frags.append(num_of_packets)
         # paket je zly
         elif packet_type == 5:
-            frags_to_send.append(num_of_packets)
+            stack.append(num_of_packets)
         # ukoncovaci paket
         elif packet_type == 6:
             everything_good[0] = True
@@ -422,7 +428,7 @@ def listen_to_data(server, packet_type, num_of_packets, file_name):
     server.my_socket.sendto(create_informative_packet(6), server.dest_adrr_port)
     data, addr = server.my_socket.recvfrom(1500)
 
-    print("\nVeľkosť fragmetov: ", len(packets[1]), "Počet fragentov: ", good,
+    print("\nVeľkosť fragmetov: ", len(packets[1]), "Počet fragmentov: ", good,
           "\nCelkovo prišlo: ", good + bad, "paketov a z toho bolo", bad, "zlých.")
     print()
     # uloz data do suboru
