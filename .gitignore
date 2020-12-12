@@ -3,3 +3,10 @@ build
 __pycache__
 dist
 abandonedGui
+diagramy
+output
+*.xlsx
+*.zip
+*.bmp
+*.txt
+
