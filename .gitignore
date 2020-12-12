@@ -9,4 +9,5 @@ output
 *.zip
 *.bmp
 *.txt
-
+*.png
+*.drawio
